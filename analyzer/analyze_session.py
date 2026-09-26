@@ -66,17 +66,36 @@ def check_runaway(entries):
 # Tools whose presence between two identical error responses counts as a "fix attempt"
 _FIX_TOOLS = {"write_file", "apply_diff", "search_and_replace", "insert_content", "execute_command"}
 
+# Words/phrases that suggest a tool_response is actually reporting a failure,
+# rather than a normal success message that merely happens to repeat.
+_ERROR_MARKERS = (
+    "error", "exception", "traceback", "failed", "failure",
+    "not found", "no such file", "denied", "invalid",
+    "cannot", "can't", "unable to", "syntax error", "undefined",
+)
+
 def _error_signature(tool_response):
     """Normalised, truncated fingerprint of a tool response string."""
     return re.sub(r"\s+", " ", tool_response.strip())[:200]
 
+def _looks_like_error(signature):
+    """Heuristic: does this response text actually read like a failure/error?"""
+    sig = signature.lower()
+    return any(marker in sig for marker in _ERROR_MARKERS)
+
 def check_recurring_error(entries):
-    """Flags when the same tool_response (error) reappears after Bob attempted a fix."""
+    """Flags when the same *error-looking* tool_response reappears after Bob attempted a fix.
+
+    Only responses that look like an actual error are considered — a benign
+    message that happens to repeat (e.g. two identical "ok" confirmations)
+    must not be flagged as a recurring error.
+    """
     responses = [
         (i, _error_signature(e["payload"].get("tool_response", "")),
          e["payload"].get("tool_name", ""))
         for i, e in enumerate(entries)
         if e["payload"].get("tool_response", "").strip()
+        and _looks_like_error(e["payload"].get("tool_response", ""))
     ]
 
     for a in range(len(responses) - 1):
