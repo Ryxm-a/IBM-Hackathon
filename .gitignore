@@ -1,0 +1,10 @@
+# Runtime session transcripts
+sample-sessions/
+
+# Analyzer runtime outputs
+analyzer/last_verdict.txt
+analyzer/health_log.jsonl
+
+# Python
+__pycache__/
+*.pyc

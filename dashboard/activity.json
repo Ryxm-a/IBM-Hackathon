@@ -1,0 +1,257 @@
+{
+  "session_id": "f71dcc7affc7ab248f92c40009581307",
+  "total_calls": 106,
+  "updated": "2026-09-26T14:37:33Z",
+  "activity": [
+    {
+      "ts": "2026-09-26T14:36:37Z",
+      "tool": "execute_command",
+      "path": "git status --short 2>&1"
+    },
+    {
+      "ts": "2026-09-26T14:36:25Z",
+      "tool": "execute_command",
+      "path": "Select-String -Path \"dashboard\\activity.json\" -Pattern \"bob_prod_bob-apikey\" | Select-Object LineNumber"
+    },
+    {
+      "ts": "2026-09-26T14:35:47Z",
+      "tool": "execute_command",
+      "path": "Get-Content \"sample-sessions\\f71dcc7affc7ab248f92c40009581307.jsonl\" | Select-Object -Index 50,97,98,100 | ForEach-Object { $_.Substring(0, [Math]::Min(200, $_.Length)) }"
+    },
+    {
+      "ts": "2026-09-26T14:35:35Z",
+      "tool": "execute_command",
+      "path": "Get-ChildItem -Recurse -File | Where-Object {$_.Extension -match '\\.(jsonl|json|py|html|md|txt)$'} | Select-String -Pattern \"BOB_API_KEY\\s*=\\s*`\"bob_\" | Select-Object Path,LineNumber,Line"
+    },
+    {
+      "ts": "2026-09-26T14:35:34Z",
+      "tool": "execute_command",
+      "path": "Get-ChildItem -Recurse -File | Where-Object {$_.Extension -match '\\.(jsonl|json|py|html|md|txt)$'} | Select-String -Pattern \"bob_prod_bob-apikey\" | Select-Object Path,LineNumber"
+    },
+    {
+      "ts": "2026-09-26T14:31:42Z",
+      "tool": "execute_command",
+      "path": "Select-String -Path \"sample-sessions\\*.jsonl\" -Pattern \"bob_prod\" -List | Select-Object Path"
+    },
+    {
+      "ts": "2026-09-26T14:31:20Z",
+      "tool": "grep",
+      "path": ""
+    },
+    {
+      "ts": "2026-09-26T14:31:20Z",
+      "tool": "grep",
+      "path": ""
+    },
+    {
+      "ts": "2026-09-26T14:31:16Z",
+      "tool": "grep",
+      "path": ""
+    },
+    {
+      "ts": "2026-09-26T14:31:16Z",
+      "tool": "grep",
+      "path": ""
+    },
+    {
+      "ts": "2026-09-26T14:31:12Z",
+      "tool": "grep",
+      "path": ""
+    },
+    {
+      "ts": "2026-09-26T14:31:12Z",
+      "tool": "glob",
+      "path": ""
+    },
+    {
+      "ts": "2026-09-26T11:52:15Z",
+      "tool": "update_todo_list",
+      "path": ""
+    },
+    {
+      "ts": "2026-09-26T11:52:07Z",
+      "tool": "execute_command",
+      "path": "Remove-Item .bob/write_test_entry.py, .bob/write_conv_entry.py -ErrorAction SilentlyContinue\nStop-Process -Id 11668 -ErrorAction SilentlyContinue\necho \"Cleaned up\""
+    },
+    {
+      "ts": "2026-09-26T11:51:55Z",
+      "tool": "execute_command",
+      "path": "python3 -c \"\nimport json, sys, os\nsys.argv = ['analyze_session.py', 'ca6f67ee2aee67b954171ef9ab6405ff']\n# Run the full main() for the small 2-call session (no flags expected)\nimport importlib.util, pathlib\nspec = importlib.util.spec_from_file_location('a', 'analyzer/analyze_session.py')\nm = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(m)\nentries = m.load_transcript('ca6f67ee2aee67b954171ef9ab6405ff')\nprint('Loaded entries:', len(entries))\nflags = []\nfor check in [m.check_repetition, m.check_runaway, m.check_recurring_error]:\n    r = check(entries)\n    if r: flags.append(r)\nprint('Flags:', flags)\nscore = m.compute_score(flags, entries)\nprint('Score:', score)\nm.write_activity('ca6f67ee2aee67b954171ef9ab6405ff', entries)\nact = json.load(open('dashboard/activity.json', encoding='utf-8'))\nprint('Activity written: session_id=%s total_calls=%d activity_rows=%d' % (act['session_id'], act['total_calls'], len(act['activity'])))\n\""
+    },
+    {
+      "ts": "2026-09-26T11:50:49Z",
+      "tool": "execute_command",
+      "path": "# Write one more entry to simulate a live update, then re-fetch\npython3 -c \"\nimport json\nfrom datetime import datetime, timezone\nts = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')\nentry = {'timestamp':ts,'session_id':'live-update-test','status':'healthy','score':100,'tool_calls':3,'flags':[],'assessment':'healthy','reason':'','recommended_action':'','suggested_prompt':''}\nwith open('analyzer/health_log.jsonl','a',encoding='utf-8') as f: f.write(json.dumps(entry)+'\\n')\nprint('Written live-update entry')\n\"\nStart-Sleep -Seconds 1\n$r2 = Invoke-WebRequest \"http://localhost:8000/analyzer/health_log.jsonl?_=1000\" -UseBasicParsing\n$count2 = ([System.Text.Encoding]::UTF8.GetString($r2.Content)).Trim().Split(\"`n\").Count\n\"Lines after live write: $count2 (should be 15)\""
+    },
+    {
+      "ts": "2026-09-26T11:49:49Z",
+      "tool": "execute_command",
+      "path": "$r = Invoke-WebRequest \"http://localhost:8000/analyzer/health_log.jsonl?_=999\" -UseBasicParsing\n$count = ([System.Text.Encoding]::UTF8.GetString($r.Content)).Trim().Split(\"`n\").Count\n\"Lines served by HTTP server: $count\""
+    },
+    {
+      "ts": "2026-09-26T11:49:33Z",
+      "tool": "execute_command",
+      "path": "node -e \"\nconst lines = require('fs').readFileSync('analyzer/health_log.jsonl','utf8').trim().split('\\n').filter(Boolean);\nconst entries = lines.map(l => { try{return JSON.parse(l)}catch(e){return null} }).filter(Boolean);\nconsole.log('Total entries parsed:', entries.length);\n\n// Simulate dashboard JS logic\nfunction legacyScore(entry) {\n  if (typeof entry.score === 'number') return entry.score;\n  const flags = entry.flags || [];\n  if (flags.length === 0) return 100;\n  let score = 100;\n  for (const f of flags) {\n    const fl = f.toLowerCase();\n    if (fl.includes('runaway') || fl.includes('tool calls')) score -= 30;\n    else if (fl.includes('unfixed loop') || fl.includes('same error')) score -= 25;\n    else if (fl.includes('written') && fl.includes('loop')) score -= 20;\n    else score -= 15;\n  }\n  return Math.max(0, score);\n}\nfunction entryStatus(e) { return e.status || (e.flags&&e.flags.length>0?'degraded':'healthy'); }\nfunction parseAssessment(raw) {\n  if (!raw || raw === 'healthy') return {isStructured:false};\n  try { const o=JSON.parse(raw); if(o&&typeof o==='object') return {isStructured:true, reason:o.reason||'', action:o.recommended_action||'', prompt:o.suggested_prompt||''}; } catch(e) {}\n  const m = raw.match(/\\{[\\s\\S]*?\\}/);\n  if (m) { try { const o=JSON.parse(m[0]); if(o&&typeof o==='object') return {isStructured:true, reason:o.reason||'', action:o.recommended_action||'', prompt:o.suggested_prompt||''}; } catch(e) {} }\n  return {isStructured:false, text:raw};\n}\nentries.forEach((e,i) => {\n  const s = entryStatus(e);\n  const sc = legacyScore(e);\n  const p = parseAssessment(e.assessment);\n  console.log('Entry '+i+': status='+s+' score='+sc+' structured='+p.isStructured+' flags='+((e.flags||[]).length));\n});\n\"\n"
+    },
+    {
+      "ts": "2026-09-26T11:16:15Z",
+      "tool": "execute_command",
+      "path": "python3 .bob/write_conv_entry.py"
+    },
+    {
+      "ts": "2026-09-26T11:15:58Z",
+      "tool": "write_file",
+      "path": ".bob/write_conv_entry.py"
+    },
+    {
+      "ts": "2026-09-26T11:15:30Z",
+      "tool": "execute_command",
+      "path": "python3 .bob/write_test_entry.py"
+    },
+    {
+      "ts": "2026-09-26T11:15:18Z",
+      "tool": "write_file",
+      "path": ".bob/write_test_entry.py"
+    },
+    {
+      "ts": "2026-09-26T11:14:51Z",
+      "tool": "execute_command",
+      "path": "python3 -c \"\nimport json\nlines = [l for l in open('analyzer/health_log.jsonl', encoding='utf-8').readlines() if l.strip()]\nlast = json.loads(lines[-1])\nprint('Last entry:', 'status='+last.get('status','?'), 'score='+str(last.get('score','?')), 'tool_calls='+str(last.get('tool_calls','?')))\nprint('Total entries:', len(lines))\n\""
+    },
+    {
+      "ts": "2026-09-26T11:14:38Z",
+      "tool": "execute_command",
+      "path": "$r = Invoke-WebRequest \"http://localhost:8000/analyzer/health_log.jsonl?_=1\" -UseBasicParsing; $lines = $r.Content.Trim().Split(\"`n\") | Where-Object {$_}; $last = $lines[-1] | ConvertFrom-Json; \"Last entry: status=$($last.status) score=$($last.score) tool_calls=$($last.tool_calls)\""
+    },
+    {
+      "ts": "2026-09-26T11:14:17Z",
+      "tool": "execute_command",
+      "path": "python3 -c \"\nimport json\nfrom datetime import datetime, timezone\nts = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')\nentry = {'timestamp': ts, 'session_id': 'test-healthy-001', 'session_start': ts, 'session_end': ts,\n         'status': 'healthy', 'score': 100, 'tool_calls': 8, 'flags': [],\n         'assessment': 'healthy', 'reason': '', 'recommended_action': '', 'suggested_prompt': ''}\nwith open('analyzer/health_log.jsonl', 'a', encoding='utf-8') as f:\n    f.write(json.dumps(entry) + '\\n')\nprint('Wrote healthy entry')\n\""
+    },
+    {
+      "ts": "2026-09-26T11:14:03Z",
+      "tool": "execute_command",
+      "path": "@(\"http://localhost:8000/analyzer/health_log.jsonl\",\"http://localhost:8000/dashboard/activity.json\") | ForEach-Object { $r = Invoke-WebRequest $_ -UseBasicParsing; \"$_ -> $($r.StatusCode) ($($r.Content.Length) bytes)\" }"
+    },
+    {
+      "ts": "2026-09-26T11:12:40Z",
+      "tool": "execute_command",
+      "path": "Start-Sleep -Seconds 2; Invoke-WebRequest http://localhost:8000/dashboard/index.html -UseBasicParsing | Select-Object StatusCode, @{n='Size';e={$_.Content.Length}}"
+    },
+    {
+      "ts": "2026-09-26T11:12:31Z",
+      "tool": "execute_command",
+      "path": "Start-Process python3 -ArgumentList \"-m\",\"http.server\",\"8000\" -WorkingDirectory \".\" -WindowStyle Hidden -PassThru | Select-Object -ExpandProperty Id"
+    },
+    {
+      "ts": "2026-09-26T11:12:15Z",
+      "tool": "update_todo_list",
+      "path": ""
+    },
+    {
+      "ts": "2026-09-26T11:12:07Z",
+      "tool": "write_file",
+      "path": "dashboard/index.html"
+    },
+    {
+      "ts": "2026-09-26T11:10:36Z",
+      "tool": "execute_command",
+      "path": "$env:BOB_API_KEY = [System.Environment]::GetEnvironmentVariable(\"BOB_API_KEY\", \"User\"); python3 -c \"\nimport sys\nsys.argv = ['analyze_session.py', 'f71dcc7affc7ab248f92c40009581307']\nimport analyzer.analyze_session as a\nentries = a.load_transcript('f71dcc7affc7ab248f92c40009581307')\na.write_activity('f71dcc7affc7ab248f92c40009581307', entries)\nprint('activity.json written,', len(entries), 'entries')\n\""
+    },
+    {
+      "ts": "2026-09-26T11:09:48Z",
+      "tool": "write_file",
+      "path": "analyzer/analyze_session.py"
+    },
+    {
+      "ts": "2026-09-26T11:09:09Z",
+      "tool": "update_todo_list",
+      "path": ""
+    },
+    {
+      "ts": "2026-09-26T11:09:00Z",
+      "tool": "read_file",
+      "path": "sample-sessions/ca6f67ee2aee67b954171ef9ab6405ff.jsonl"
+    },
+    {
+      "ts": "2026-09-26T11:08:57Z",
+      "tool": "list_files",
+      "path": "sample-sessions"
+    },
+    {
+      "ts": "2026-09-26T11:08:54Z",
+      "tool": "read_file",
+      "path": "analyzer/health_log.jsonl"
+    },
+    {
+      "ts": "2026-09-26T11:08:51Z",
+      "tool": "read_file",
+      "path": "dashboard/index.html"
+    },
+    {
+      "ts": "2026-09-26T11:08:51Z",
+      "tool": "read_file",
+      "path": "analyzer/analyze_session.py"
+    },
+    {
+      "ts": "2026-09-26T10:54:56Z",
+      "tool": "read_file",
+      "path": "analyzer/last_verdict.txt"
+    },
+    {
+      "ts": "2026-09-26T10:54:53Z",
+      "tool": "execute_command",
+      "path": "$env:BOB_API_KEY = [System.Environment]::GetEnvironmentVariable(\"BOB_API_KEY\", \"User\"); python3 analyzer/analyze_session.py f71dcc7affc7ab248f92c40009581307"
+    },
+    {
+      "ts": "2026-09-26T10:53:12Z",
+      "tool": "apply_diff",
+      "path": "analyzer/analyze_session.py"
+    },
+    {
+      "ts": "2026-09-26T10:53:02Z",
+      "tool": "read_file",
+      "path": "analyzer/health_log.jsonl"
+    },
+    {
+      "ts": "2026-09-26T10:52:57Z",
+      "tool": "execute_command",
+      "path": "$env:BOB_API_KEY = [System.Environment]::GetEnvironmentVariable(\"BOB_API_KEY\", \"User\"); python3 analyzer/analyze_session.py f71dcc7affc7ab248f92c40009581307"
+    },
+    {
+      "ts": "2026-09-26T10:51:15Z",
+      "tool": "apply_diff",
+      "path": "analyzer/analyze_session.py"
+    },
+    {
+      "ts": "2026-09-26T10:51:04Z",
+      "tool": "read_file",
+      "path": "analyzer/analyze_session.py"
+    },
+    {
+      "ts": "2026-09-26T10:51:00Z",
+      "tool": "execute_command",
+      "path": "$env:BOB_API_KEY = [System.Environment]::GetEnvironmentVariable(\"BOB_API_KEY\", \"User\"); bob.cmd run --format json --log-level silent --max-turns 1 \"Reply with only the word OK\" 2>&1"
+    },
+    {
+      "ts": "2026-09-26T10:50:17Z",
+      "tool": "execute_command",
+      "path": "$env:BOB_API_KEY = [System.Environment]::GetEnvironmentVariable(\"BOB_API_KEY\", \"User\"); bob.cmd run --format json --max-turns 1 \"Reply with only the word OK\" 2>&1"
+    },
+    {
+      "ts": "2026-09-26T10:49:33Z",
+      "tool": "execute_command",
+      "path": "$env:BOB_API_KEY = [System.Environment]::GetEnvironmentVariable(\"BOB_API_KEY\", \"User\"); bob.cmd run --max-turns 1 \"Reply with only the word OK\" 2>&1"
+    },
+    {
+      "ts": "2026-09-26T10:48:20Z",
+      "tool": "execute_command",
+      "path": "$env:BOB_API_KEY = [System.Environment]::GetEnvironmentVariable(\"BOB_API_KEY\", \"User\"); Measure-Command { bob.cmd run --max-turns 1 \"Reply with only the word OK\" } | Select-Object TotalSeconds"
+    },
+    {
+      "ts": "2026-09-26T10:44:49Z",
+      "tool": "read_file",
+      "path": "analyzer/health_log.jsonl"
+    }
+  ]
+}

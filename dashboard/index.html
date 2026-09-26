@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bob Session Health Monitor</title>
+<style>
+/* ── Reset & base ─────────────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,"Segoe UI",system-ui,sans-serif;background:#0d0f14;color:#d4d8e2;font-size:14px;line-height:1.6;min-height:100vh}
+a{color:#4dd0e1;text-decoration:none}
+button{cursor:pointer;font:inherit}
+pre,code{font-family:"Cascadia Code","Fira Code","Consolas",monospace;font-size:12px}
+
+/* ── Layout ───────────────────────────────────────────────── */
+.page{max-width:1200px;margin:0 auto;padding:24px 20px}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+@media(max-width:800px){.grid-2,.grid-3{grid-template-columns:1fr}}
+
+/* ── Card ─────────────────────────────────────────────────── */
+.card{background:#141720;border:1px solid #1e2330;border-radius:10px;padding:20px}
+.card-title{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#5a6480;margin-bottom:14px}
+
+/* ── Header ───────────────────────────────────────────────── */
+.header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:12px}
+.header-left h1{font-size:22px;font-weight:700;color:#e8eaf6;letter-spacing:-.3px}
+.header-left p{font-size:12px;color:#5a6480;margin-top:2px}
+.header-right{display:flex;align-items:center;gap:12px}
+.status-dot{width:8px;height:8px;border-radius:50%;background:#4caf50;display:inline-block;margin-right:6px}
+.status-dot.error{background:#ff5252}
+.status-dot.warn{background:#ffb74d}
+.status-dot.pulse{animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.badge{font-size:11px;padding:3px 9px;border-radius:20px;font-weight:600;letter-spacing:.04em}
+.badge-live{background:#1a2e1a;color:#4caf50;border:1px solid #2a4a2a}
+.badge-lost{background:#2e1a1a;color:#ff5252;border:1px solid #4a2a2a}
+.last-updated{font-size:11px;color:#3d4560}
+.toggle-btn{background:#1a1f2e;border:1px solid #262d42;color:#8899bb;font-size:12px;padding:5px 12px;border-radius:6px;transition:all .15s}
+.toggle-btn.active{background:#1a2a3e;border-color:#4dd0e1;color:#4dd0e1}
+
+/* ── Hero score card ──────────────────────────────────────── */
+.hero{display:grid;grid-template-columns:auto 1fr;gap:32px;align-items:center;margin-bottom:16px}
+.score-ring{position:relative;width:120px;height:120px;flex-shrink:0}
+.score-ring svg{transform:rotate(-90deg)}
+.score-ring .track{fill:none;stroke:#1e2330;stroke-width:10}
+.score-ring .fill{fill:none;stroke-width:10;stroke-linecap:round;transition:stroke-dashoffset .6s ease,stroke .4s}
+.score-num{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1}
+.score-num span:first-child{font-size:32px;font-weight:800}
+.score-num span:last-child{font-size:10px;color:#5a6480;margin-top:2px}
+.status-label{font-size:28px;font-weight:800;letter-spacing:-.5px;transition:color .4s}
+.status-label.healthy{color:#4caf50}
+.status-label.degraded{color:#ff5252}
+.status-label.unknown{color:#ffb74d}
+.status-reason{font-size:13px;color:#7a849e;margin-top:6px;max-width:480px}
+.score-explain{font-size:11px;color:#4dd0e1;margin-top:10px;cursor:pointer;display:inline-block}
+.score-explain-body{display:none;font-size:12px;color:#5a6480;background:#0d0f14;border-radius:6px;padding:10px 14px;margin-top:8px;line-height:1.7}
+.score-explain-body.open{display:block}
+
+/* ── Mini stat cards ──────────────────────────────────────── */
+.stat-card{background:#141720;border:1px solid #1e2330;border-radius:8px;padding:14px 16px}
+.stat-val{font-size:26px;font-weight:700;line-height:1;margin-bottom:4px}
+.stat-lbl{font-size:11px;color:#5a6480;font-weight:500}
+.stat-val.green{color:#4caf50}
+.stat-val.red{color:#ff5252}
+.stat-val.amber{color:#ffb74d}
+.stat-val.blue{color:#4dd0e1}
+
+/* ── Flags section ────────────────────────────────────────── */
+.flag-item{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid #1a1f2e}
+.flag-item:last-child{border-bottom:none}
+.flag-icon{font-size:16px;flex-shrink:0;margin-top:1px}
+.flag-body{flex:1}
+.flag-text{font-size:13px;color:#d4d8e2}
+.flag-category{display:inline-block;font-size:10px;font-weight:600;padding:2px 7px;border-radius:10px;margin-top:4px;letter-spacing:.05em}
+.cat-runaway{background:#2e1a0a;color:#ffb74d;border:1px solid #4a320e}
+.cat-recurring{background:#2e0a0a;color:#ff5252;border:1px solid #4a1a1a}
+.cat-repeated{background:#1a1a2e;color:#8888ff;border:1px solid #2a2a4a}
+.cat-other{background:#1a2e2e;color:#4dd0e1;border:1px solid #0a3a3a}
+.no-flags{color:#3d4560;font-size:13px;text-align:center;padding:24px 0}
+
+/* ── Assessment card ──────────────────────────────────────── */
+.assessment-text{font-size:13px;color:#9aa3bb;line-height:1.7;white-space:pre-wrap;word-break:break-word}
+.assessment-field{margin-bottom:10px}
+.assessment-field-label{font-size:10px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:#3d4560;margin-bottom:3px}
+.assessment-field-val{font-size:13px;color:#c8d0e0}
+.assessment-plain-note{font-size:11px;color:#3d4560;margin-top:8px;font-style:italic}
+
+/* ── Recovery card ────────────────────────────────────────── */
+.action-pill{display:inline-block;padding:4px 14px;border-radius:20px;font-size:12px;font-weight:600;margin-bottom:12px}
+.action-new-session{background:#1a2e1a;color:#4caf50;border:1px solid #2a4a2a}
+.action-narrower{background:#1a1a2e;color:#8888ff;border:1px solid #2a2a4a}
+.action-rollback{background:#2e1a0a;color:#ffb74d;border:1px solid #4a320e}
+.action-verify{background:#1a2e2e;color:#4dd0e1;border:1px solid #0a3a3a}
+.action-none{background:#1e2330;color:#5a6480;border:1px solid #262d42}
+.prompt-box{background:#0d0f14;border:1px solid #1e2330;border-radius:6px;padding:12px 14px;font-size:12px;color:#9aa3bb;font-family:"Cascadia Code","Fira Code","Consolas",monospace;white-space:pre-wrap;word-break:break-word;margin-top:10px;position:relative}
+.copy-btn{position:absolute;top:8px;right:8px;background:#1a1f2e;border:1px solid #262d42;color:#8899bb;font-size:11px;padding:3px 10px;border-radius:5px;transition:all .15s}
+.copy-btn:hover{background:#1a2a3e;border-color:#4dd0e1;color:#4dd0e1}
+.copy-btn.copied{background:#1a2e1a;border-color:#2a4a2a;color:#4caf50}
+.no-recovery{font-size:13px;color:#3d4560;padding:8px 0}
+
+/* ── Timeline ─────────────────────────────────────────────── */
+.timeline-filters{display:flex;gap:8px;margin-bottom:14px}
+.filter-btn{background:#1a1f2e;border:1px solid #262d42;color:#5a6480;font-size:11px;padding:4px 12px;border-radius:20px;transition:all .15s}
+.filter-btn.active{background:#1a2a3e;border-color:#4dd0e1;color:#4dd0e1}
+.timeline-entry{border-left:3px solid #1e2330;padding:10px 0 10px 16px;position:relative;cursor:pointer}
+.timeline-entry::before{content:'';position:absolute;left:-6px;top:14px;width:9px;height:9px;border-radius:50%;background:#1e2330;border:2px solid #262d42}
+.timeline-entry.healthy::before{background:#4caf50;border-color:#4caf50}
+.timeline-entry.degraded::before{background:#ff5252;border-color:#ff5252}
+.timeline-entry:hover .tl-header{color:#e8eaf6}
+.tl-header{display:flex;align-items:center;gap:10px;transition:color .1s}
+.tl-status{font-size:12px;font-weight:700}
+.tl-status.healthy{color:#4caf50}
+.tl-status.degraded{color:#ff5252}
+.tl-time{font-size:11px;color:#3d4560;margin-left:auto}
+.tl-flags-preview{font-size:11px;color:#5a6480;margin-top:3px}
+.tl-detail{display:none;background:#0d0f14;border-radius:6px;padding:12px;margin-top:8px;font-size:12px;color:#7a849e}
+.tl-detail.open{display:block}
+.timeline-empty{font-size:13px;color:#3d4560;text-align:center;padding:24px 0}
+
+/* ── Activity panel ───────────────────────────────────────── */
+.activity-row{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #141720}
+.activity-row:last-child{border-bottom:none}
+.tool-badge{font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;background:#1a1f2e;color:#8899bb;border:1px solid #262d42;white-space:nowrap;flex-shrink:0}
+.tool-path{font-size:12px;color:#7a849e;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+.tool-time{font-size:10px;color:#3d4560;flex-shrink:0}
+.activity-empty{font-size:13px;color:#3d4560;text-align:center;padding:24px 0}
+
+/* ── Transitions ──────────────────────────────────────────── */
+.fade-in{animation:fadeIn .3s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+/* ── Empty state ──────────────────────────────────────────── */
+.empty-state{text-align:center;padding:60px 20px;color:#3d4560}
+.empty-state h2{font-size:18px;color:#5a6480;margin-bottom:8px}
+.empty-state p{font-size:13px;line-height:1.7}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-left">
+      <h1>Bob Session Health Monitor</h1>
+      <p>Real-time AI coding session monitoring</p>
+    </div>
+    <div class="header-right">
+      <span id="conn-indicator"><span class="status-dot pulse" id="conn-dot"></span><span id="conn-text" class="badge badge-live">Live</span></span>
+      <span class="last-updated" id="last-updated">—</span>
+      <button class="toggle-btn active" id="auto-refresh-btn" onclick="toggleRefresh()">Auto-refresh</button>
+    </div>
+  </div>
+
+  <!-- Empty state (shown when no data) -->
+  <div id="empty-state" class="empty-state" style="display:none">
+    <h2>No session data yet</h2>
+    <p>Start a Bob Shell session from this project folder.<br>The dashboard will update automatically when health data is written.</p>
+  </div>
+
+  <!-- Main content (hidden until data loads) -->
+  <div id="main-content" style="display:none">
+
+    <!-- Hero: score + status -->
+    <div class="card fade-in" style="margin-bottom:16px">
+      <div class="hero">
+        <div class="score-ring">
+          <svg width="120" height="120" viewBox="0 0 120 120">
+            <circle class="track" cx="60" cy="60" r="50"/>
+            <circle class="fill" id="score-arc" cx="60" cy="60" r="50"
+                    stroke-dasharray="314" stroke-dashoffset="314" stroke="#4caf50"/>
+          </svg>
+          <div class="score-num">
+            <span id="score-num">—</span>
+            <span>/ 100</span>
+          </div>
+        </div>
+        <div>
+          <div class="status-label" id="status-label">—</div>
+          <div class="status-reason" id="status-reason"></div>
+          <span class="score-explain" onclick="toggleExplain()">▸ How is this calculated?</span>
+          <div class="score-explain-body" id="score-explain-body">
+            <strong>Score model (not an official IBM metric)</strong><br>
+            Starts at 100 and deducts for each detected signal:<br>
+            &nbsp;• Runaway session (≥25 tool calls): −30<br>
+            &nbsp;• Recurring unfixed error: −25<br>
+            &nbsp;• Repeated file writes (same file ≥3×): −20<br>
+            &nbsp;• Other flag: −15<br>
+            Score floored at 0. Healthy sessions score 100.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Stat cards -->
+    <div class="grid-3" style="margin-bottom:16px" id="stat-row">
+      <div class="stat-card">
+        <div class="stat-val blue" id="stat-tool-calls">—</div>
+        <div class="stat-lbl">Tool calls (latest session)</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-val" id="stat-problems">—</div>
+        <div class="stat-lbl">Problems detected</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-val blue" id="stat-sessions">—</div>
+        <div class="stat-lbl">Sessions analysed</div>
+      </div>
+    </div>
+
+    <!-- Detected problems + Bob assessment (side by side) -->
+    <div class="grid-2" style="margin-bottom:16px">
+
+      <div class="card">
+        <div class="card-title">Detected Problems</div>
+        <div id="flags-body"><div class="no-flags">No problems detected</div></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Bob's Assessment</div>
+        <div id="assessment-body"><div class="no-flags">No assessment available</div></div>
+      </div>
+
+    </div>
+
+    <!-- Recovery -->
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">Recommended Recovery</div>
+      <div id="recovery-body"><div class="no-recovery">No recovery recommendation available.</div></div>
+    </div>
+
+    <!-- Timeline + Activity (side by side) -->
+    <div class="grid-2">
+
+      <div class="card">
+        <div class="card-title">Session Timeline</div>
+        <div class="timeline-filters">
+          <button class="filter-btn active" onclick="setFilter('all',this)">All</button>
+          <button class="filter-btn" onclick="setFilter('healthy',this)">Healthy</button>
+          <button class="filter-btn" onclick="setFilter('degraded',this)">Degraded</button>
+        </div>
+        <div id="timeline-body"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Recent Tool Activity</div>
+        <div id="activity-body"><div class="activity-empty">No activity data yet</div></div>
+      </div>
+
+    </div>
+
+  </div><!-- /main-content -->
+</div><!-- /page -->
+
+<script>
+'use strict';
+
+// ── State ──────────────────────────────────────────────────────────────────
+let allEntries   = [];
+let timelineFilter = 'all';
+let autoRefresh  = true;
+let pollTimer    = null;
+let prevLogLen   = 0;
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+function relTime(iso) {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso);
+    const diff = Date.now() - d.getTime();
+    if (diff < 60000)  return 'just now';
+    if (diff < 3600000) return Math.floor(diff/60000)+'m ago';
+    if (diff < 86400000) return Math.floor(diff/3600000)+'h ago';
+    return d.toLocaleDateString();
+  } catch(e) { return iso; }
+}
+
+function fmtTime(iso) {
+  if (!iso) return '';
+  try { return new Date(iso).toLocaleTimeString(); }
+  catch(e) { return iso; }
+}
+
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Try to parse assessment string as JSON; fall back gracefully.
+function parseAssessment(raw) {
+  if (!raw || raw === 'healthy') return {isStructured:false, text:'', reason:'', action:'', prompt:''};
+  // Direct JSON
+  try {
+    const o = JSON.parse(raw);
+    if (typeof o === 'object' && o !== null) {
+      return {isStructured:true, status:o.status||'', reason:o.reason||'',
+              action:o.recommended_action||'', prompt:o.suggested_prompt||''};
+    }
+  } catch(e) {}
+  // Embedded JSON
+  const m = raw.match(/\{[\s\S]*?\}/);
+  if (m) {
+    try {
+      const o = JSON.parse(m[0]);
+      if (typeof o === 'object' && o !== null) {
+        return {isStructured:true, status:o.status||'', reason:o.reason||'',
+                action:o.recommended_action||'', prompt:o.suggested_prompt||''};
+      }
+    } catch(e) {}
+  }
+  // Plain text
+  return {isStructured:false, text:raw, reason:'', action:'', prompt:''};
+}
+
+function flagCategory(flag) {
+  const fl = flag.toLowerCase();
+  if (fl.includes('tool calls') || fl.includes('runaway')) return ['cat-runaway','Runaway session'];
+  if (fl.includes('unfixed loop') || fl.includes('same error')) return ['cat-recurring','Recurring error'];
+  if (fl.includes('written') && fl.includes('loop')) return ['cat-repeated','Repeated activity'];
+  return ['cat-other','Other'];
+}
+
+function actionClass(action) {
+  const a = (action||'').toLowerCase();
+  if (a.includes('new_session') || a.includes('new session')) return 'action-new-session';
+  if (a.includes('narrow')) return 'action-narrower';
+  if (a.includes('rollback')) return 'action-rollback';
+  if (a.includes('verif')) return 'action-verify';
+  return 'action-none';
+}
+
+function scoreColor(s) {
+  if (s >= 80) return '#4caf50';
+  if (s >= 50) return '#ffb74d';
+  return '#ff5252';
+}
+
+// Compute score from legacy entries (no score field)
+function legacyScore(entry) {
+  if (typeof entry.score === 'number') return entry.score;
+  const flags = entry.flags || [];
+  if (flags.length === 0) return 100;
+  let score = 100;
+  for (const f of flags) {
+    const fl = f.toLowerCase();
+    if (fl.includes('runaway') || fl.includes('tool calls')) score -= 30;
+    else if (fl.includes('unfixed loop') || fl.includes('same error')) score -= 25;
+    else if (fl.includes('written') && fl.includes('loop')) score -= 20;
+    else score -= 15;
+  }
+  return Math.max(0, score);
+}
+
+function entryStatus(entry) {
+  if (entry.status) return entry.status;
+  return (entry.flags && entry.flags.length > 0) ? 'degraded' : 'healthy';
+}
+
+// ── Rendering ──────────────────────────────────────────────────────────────
+
+function renderHero(latest) {
+  const score  = legacyScore(latest);
+  const status = entryStatus(latest);
+  const color  = scoreColor(score);
+  const circ   = 2 * Math.PI * 50;  // 314.16
+  const offset = circ * (1 - score / 100);
+
+  document.getElementById('score-num').textContent = score;
+  document.getElementById('score-num').style.color = color;
+  const arc = document.getElementById('score-arc');
+  arc.style.stroke = color;
+  arc.style.strokeDashoffset = offset;
+
+  const lbl = document.getElementById('status-label');
+  lbl.textContent = status.toUpperCase();
+  lbl.className = 'status-label ' + status;
+
+  const reasonEl = document.getElementById('status-reason');
+  const parsed = parseAssessment(latest.assessment);
+  const reason = latest.reason || parsed.reason || '';
+  reasonEl.textContent = reason
+    ? reason
+    : (status === 'healthy' ? 'No problems detected in the latest session.' : '');
+}
+
+function renderStats(entries) {
+  const latest = entries[entries.length - 1];
+  const problems = (latest.flags || []).length;
+  const calls = latest.tool_calls != null ? latest.tool_calls : '—';
+
+  const probEl = document.getElementById('stat-problems');
+  probEl.textContent = problems;
+  probEl.className = 'stat-val ' + (problems > 0 ? 'red' : 'green');
+
+  document.getElementById('stat-tool-calls').textContent = calls;
+  document.getElementById('stat-sessions').textContent = entries.length;
+}
+
+function renderFlags(latest) {
+  const flags = latest.flags || [];
+  const el = document.getElementById('flags-body');
+  if (flags.length === 0) {
+    el.innerHTML = '<div class="no-flags">No problems detected in the latest session</div>';
+    return;
+  }
+  el.innerHTML = flags.map(f => {
+    const [cls, label] = flagCategory(f);
+    return `<div class="flag-item">
+      <div class="flag-icon">⚠️</div>
+      <div class="flag-body">
+        <div class="flag-text">${escHtml(f)}</div>
+        <span class="flag-category ${cls}">${label}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderAssessment(latest) {
+  const el = document.getElementById('assessment-body');
+  const raw = latest.assessment;
+  if (!raw || raw === 'healthy') {
+    el.innerHTML = '<div class="no-flags">Session was healthy — no assessment needed.</div>';
+    return;
+  }
+  const p = parseAssessment(raw);
+  if (p.isStructured && p.reason) {
+    el.innerHTML = `
+      <div class="assessment-field">
+        <div class="assessment-field-label">Status</div>
+        <div class="assessment-field-val">${escHtml(p.status||'—')}</div>
+      </div>
+      <div class="assessment-field">
+        <div class="assessment-field-label">Reason</div>
+        <div class="assessment-field-val">${escHtml(p.reason)}</div>
+      </div>`;
+  } else {
+    const displayText = p.text || raw;
+    el.innerHTML = `<div class="assessment-text">${escHtml(displayText)}</div>
+      <div class="assessment-plain-note">Structured assessment unavailable — displaying raw response.</div>`;
+  }
+}
+
+function renderRecovery(latest) {
+  const el = document.getElementById('recovery-body');
+  const p = parseAssessment(latest.assessment);
+  const action = latest.recommended_action || p.action || '';
+  const prompt = latest.suggested_prompt  || p.prompt || '';
+
+  if (!action && !prompt) {
+    el.innerHTML = '<div class="no-recovery">No recovery recommendation available for this session.</div>';
+    return;
+  }
+
+  const aCls = actionClass(action);
+  const aLabel = action
+    ? action.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase())
+    : '';
+  let html = '';
+  if (aLabel) html += `<span class="action-pill ${aCls}">${escHtml(aLabel)}</span>`;
+  if (prompt) {
+    html += `<div class="prompt-box" id="prompt-box">${escHtml(prompt)}<button class="copy-btn" id="copy-btn" onclick="copyPrompt()">Copy</button></div>`;
+  }
+  el.innerHTML = html;
+}
+
+function copyPrompt() {
+  const box = document.getElementById('prompt-box');
+  const btn = document.getElementById('copy-btn');
+  const text = box ? box.childNodes[0].textContent : '';
+  if (!text) return;
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = 'Copied!';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 2000);
+  }).catch(() => {
+    // Fallback for HTTP
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    btn.textContent = 'Copied!';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 2000);
+  });
+}
+
+function renderTimeline(entries) {
+  const el = document.getElementById('timeline-body');
+  const filtered = [...entries].reverse().filter(e => {
+    if (timelineFilter === 'all') return true;
+    return entryStatus(e) === timelineFilter;
+  });
+  if (filtered.length === 0) {
+    el.innerHTML = '<div class="timeline-empty">No entries match this filter.</div>';
+    return;
+  }
+  el.innerHTML = filtered.map((e, i) => {
+    const status = entryStatus(e);
+    const flags  = e.flags || [];
+    const p      = parseAssessment(e.assessment);
+    const ts     = e.timestamp || '';
+    const shortAssessment = p.isStructured && p.reason
+      ? p.reason
+      : (e.assessment && e.assessment !== 'healthy' ? e.assessment.slice(0,80)+'…' : '');
+    return `<div class="timeline-entry ${status}" onclick="toggleTl(${i})">
+      <div class="tl-header">
+        <span class="tl-status ${status}">${status.toUpperCase()}</span>
+        <span class="tl-flags-preview">${flags.length > 0 ? flags.length+' flag'+(flags.length>1?'s':'') : 'No flags'}</span>
+        <span class="tl-time">${relTime(ts)||fmtTime(ts)}</span>
+      </div>
+      ${flags.length > 0 ? `<div style="font-size:11px;color:#5a6480;margin-top:3px">${escHtml(flags[0].slice(0,80))}${flags[0].length>80?'…':''}</div>` : ''}
+      <div class="tl-detail" id="tl-${i}">
+        ${ts ? `<div><strong>Detected:</strong> ${fmtTime(ts)} (${relTime(ts)})</div>` : ''}
+        ${e.tool_calls != null ? `<div><strong>Tool calls:</strong> ${e.tool_calls}</div>` : ''}
+        ${flags.map(f=>`<div style="margin-top:4px;color:#ffb74d">⚠ ${escHtml(f)}</div>`).join('')}
+        ${shortAssessment ? `<div style="margin-top:6px;color:#7a849e">${escHtml(shortAssessment)}</div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function toggleTl(i) {
+  const d = document.getElementById('tl-'+i);
+  if (d) d.classList.toggle('open');
+}
+
+function renderActivity(data) {
+  const el = document.getElementById('activity-body');
+  if (!data || !data.activity || data.activity.length === 0) {
+    el.innerHTML = '<div class="activity-empty">No activity data yet</div>';
+    return;
+  }
+  const rows = data.activity.slice(0,30).map(a => {
+    const path = a.path ? a.path.replace(/.*[/\\]/, '') : '';
+    return `<div class="activity-row">
+      <span class="tool-badge">${escHtml(a.tool||'?')}</span>
+      <span class="tool-path" title="${escHtml(a.path||'')}">${escHtml(path||a.path||'')}</span>
+      <span class="tool-time">${fmtTime(a.ts)}</span>
+    </div>`;
+  }).join('');
+  el.innerHTML = rows;
+}
+
+// ── Filter ─────────────────────────────────────────────────────────────────
+
+function setFilter(f, btn) {
+  timelineFilter = f;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderTimeline(allEntries);
+}
+
+// ── Score explain toggle ───────────────────────────────────────────────────
+
+function toggleExplain() {
+  const b = document.getElementById('score-explain-body');
+  const t = document.querySelector('.score-explain');
+  b.classList.toggle('open');
+  t.textContent = b.classList.contains('open') ? '▾ How is this calculated?' : '▸ How is this calculated?';
+}
+
+// ── Auto-refresh toggle ────────────────────────────────────────────────────
+
+function toggleRefresh() {
+  autoRefresh = !autoRefresh;
+  const btn = document.getElementById('auto-refresh-btn');
+  btn.classList.toggle('active', autoRefresh);
+  btn.textContent = autoRefresh ? 'Auto-refresh' : 'Auto-refresh off';
+  if (autoRefresh) schedulePoll();
+}
+
+// ── Connection indicator ───────────────────────────────────────────────────
+
+function setConnected(ok) {
+  const dot  = document.getElementById('conn-dot');
+  const text = document.getElementById('conn-text');
+  dot.className  = 'status-dot ' + (ok ? 'pulse' : 'error');
+  text.textContent = ok ? 'Live' : 'Connection lost';
+  text.className = 'badge ' + (ok ? 'badge-live' : 'badge-lost');
+}
+
+// ── Fetch + render ─────────────────────────────────────────────────────────
+
+async function fetchJSONL(url) {
+  const res = await fetch(url + '?_=' + Date.now());
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const text = await res.text();
+  return text.trim().split('\n').filter(Boolean).map(l => {
+    try { return JSON.parse(l); } catch(e) { return null; }
+  }).filter(Boolean);
+}
+
+async function fetchJSON(url) {
+  const res = await fetch(url + '?_=' + Date.now());
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return res.json();
+}
+
+async function poll() {
+  try {
+    const entries = await fetchJSONL('../analyzer/health_log.jsonl');
+    setConnected(true);
+    document.getElementById('last-updated').textContent = 'Updated ' + new Date().toLocaleTimeString();
+
+    const hasNew = entries.length !== prevLogLen;
+    prevLogLen = entries.length;
+    allEntries = entries;
+
+    if (entries.length === 0) {
+      document.getElementById('empty-state').style.display = '';
+      document.getElementById('main-content').style.display = 'none';
+    } else {
+      document.getElementById('empty-state').style.display = 'none';
+      document.getElementById('main-content').style.display = '';
+
+      const latest = entries[entries.length - 1];
+      renderHero(latest);
+      renderStats(entries);
+      renderFlags(latest);
+      renderAssessment(latest);
+      renderRecovery(latest);
+      if (hasNew) renderTimeline(entries);
+    }
+  } catch(e) {
+    setConnected(false);
+    // Keep existing displayed data; show empty state only if nothing loaded yet
+    if (allEntries.length === 0) {
+      document.getElementById('empty-state').style.display = '';
+      document.getElementById('main-content').style.display = 'none';
+    }
+  }
+
+  // Activity is fetched independently — best-effort
+  try {
+    const activity = await fetchJSON('../dashboard/activity.json');
+    renderActivity(activity);
+  } catch(e) { /* silent — activity panel stays as-is */ }
+}
+
+function schedulePoll() {
+  clearTimeout(pollTimer);
+  if (autoRefresh) pollTimer = setTimeout(async () => { await poll(); schedulePoll(); }, 2500);
+}
+
+// ── Boot ───────────────────────────────────────────────────────────────────
+(async function init() {
+  await poll();
+  schedulePoll();
+})();
+</script>
+</body>
+</html>

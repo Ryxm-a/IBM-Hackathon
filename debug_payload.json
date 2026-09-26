@@ -1,0 +1,15 @@
+--- 2026-09-26T09:37:06Z ---
+{
+  "session_id": "bb7bd30e937e105950a50aa149fb3441",
+  "cwd": "c:\\Users\\basam\\Desktop\\bob in a bob",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "write_file",
+  "tool_input": {
+    "path": "test.txt",
+    "content": "hello",
+    "line_count": 1
+  },
+  "tool_response": "Created file: test.txt\n\n<result>\nhello\n</result>",
+  "tool_use_id": "tooluse_O9DDPiRStVnLTH7YAMczeu"
+}
+
