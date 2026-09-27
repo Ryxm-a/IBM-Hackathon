@@ -1,0 +1,26 @@
+{
+  "description": "Wires this repo's Bob-originated session health monitor into Codex CLI. Same detection engine and hardcoded verdicts as .bob/settings.json and .claude/settings.json — see README.md.",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "hooks": [
+          { "type": "command", "command": "BOB_MONITOR_ASSISTANT=codex-cli python3 hooks/log_tool_use.py" }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "BOB_MONITOR_ASSISTANT=codex-cli python3 hooks/on_stop_analyze.py", "timeout": 30 }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "python3 hooks/on_prompt_check.py" }
+        ]
+      }
+    ]
+  }
+}

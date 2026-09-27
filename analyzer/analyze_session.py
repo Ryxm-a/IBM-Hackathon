@@ -1,3 +1,28 @@
+"""
+analyzer/analyze_session.py
+----------------------------
+Core of the (originally IBM Bob-only, now multi-assistant) Session Health
+Monitor. Everything in this file — the three detection heuristics, the
+health-log format, the dashboard activity feed — is IBM Bob's original
+design. Two things were added on top of that foundation for this build:
+
+1. Assistant awareness. Every logged entry now carries an "assistant" tag
+   ("bob", "claude-code", "codex-cli", "gemini-cli") set by whichever hook
+   script wrote it, via the BOB_MONITOR_ASSISTANT environment variable. This
+   file reads that tag off the session's entries and threads it through to
+   last_verdict.txt / health_log.jsonl / dashboard/activity.json, so a mixed
+   history (e.g. you use Bob for one repo and Claude Code for another) stays
+   distinguishable.
+
+2. A hardcoded rules engine (analyzer/rules.py) replaces the default call to
+   `bob -p` for turning flags into a verdict. See rules.py's module
+   docstring for the full reasoning. The old behavior — call out to Bob
+   in a recursive inner session for an LLM-generated assessment — still
+   exists below (ask_bob_judge / _bob_executable) and can be switched back
+   on by setting BOB_MONITOR_AI_JUDGE=1 in the environment before this
+   script runs. It is off by default.
+"""
+
 import json
 import glob
 import subprocess
@@ -8,10 +33,16 @@ import re
 from collections import Counter
 from datetime import datetime, timezone
 
+import rules
+
 TRANSCRIPT_DIR = "sample-sessions"
-VERDICT_FILE   = "analyzer/last_verdict.txt"
-HEALTH_LOG     = "analyzer/health_log.jsonl"
-ACTIVITY_FILE  = "dashboard/activity.json"   # written for dashboard; not used by hooks
+VERDICT_FILE = "analyzer/last_verdict.txt"
+HEALTH_LOG = "analyzer/health_log.jsonl"
+ACTIVITY_FILE = "dashboard/activity.json"  # written for dashboard; not used by hooks
+
+# Off by default. Set BOB_MONITOR_AI_JUDGE=1 to restore the original
+# behavior of asking `bob -p` for a verdict instead of using rules.py.
+USE_AI_JUDGE = os.environ.get("BOB_MONITOR_AI_JUDGE", "").strip().lower() in ("1", "true", "yes")
 
 # ---------------------------------------------------------------------------
 # Transcript loading
@@ -34,11 +65,24 @@ def load_transcript(session_id=None):
         if not os.path.exists(path):
             return []
         return _parse(path)
+
     # Fallback: use the most recently modified file
     files = sorted(glob.glob(f"{TRANSCRIPT_DIR}/*.jsonl"), key=os.path.getmtime)
     if not files:
         return []
     return _parse(files[-1])
+
+
+def session_assistant(entries):
+    """Which coding assistant produced this session's log. Every entry is
+    tagged at write time by hooks/log_tool_use.py (or hooks/gemini_adapter.py
+    for Gemini CLI); older logs without the tag default to "bob"."""
+    for e in entries:
+        tag = e.get("assistant")
+        if tag:
+            return tag
+    return "bob"
+
 
 # ---------------------------------------------------------------------------
 # Heuristics
@@ -54,14 +98,25 @@ def check_repetition(entries):
     counts = Counter([p for p in paths if p])
     for path, count in counts.items():
         if count >= 3:
-            return f"File '{path}' was written {count} times in the last 15 actions — possible loop."
+            return {
+                "type": "repetition",
+                "path": path,
+                "count": count,
+                "message": f"File '{path}' was written {count} times in the last 15 actions — possible loop.",
+            }
     return None
+
 
 def check_runaway(entries):
     """Flags if there's a huge number of tool calls with no stop in between."""
     if len(entries) >= 25:
-        return f"{len(entries)} tool calls in this session with no break — possible runaway session."
+        return {
+            "type": "runaway",
+            "total": len(entries),
+            "message": f"{len(entries)} tool calls in this session with no break — possible runaway session.",
+        }
     return None
+
 
 # Tools whose presence between two identical error responses counts as a "fix attempt"
 _FIX_TOOLS = {"write_file", "apply_diff", "search_and_replace", "insert_content", "execute_command"}
@@ -74,14 +129,17 @@ _ERROR_MARKERS = (
     "cannot", "can't", "unable to", "syntax error", "undefined",
 )
 
+
 def _error_signature(tool_response):
     """Normalised, truncated fingerprint of a tool response string."""
     return re.sub(r"\s+", " ", tool_response.strip())[:200]
+
 
 def _looks_like_error(signature):
     """Heuristic: does this response text actually read like a failure/error?"""
     sig = signature.lower()
     return any(marker in sig for marker in _ERROR_MARKERS)
+
 
 def check_recurring_error(entries):
     """Flags when the same *error-looking* tool_response reappears after Bob attempted a fix.
@@ -109,39 +167,42 @@ def check_recurring_error(entries):
                 for e in entries[idx_a + 1:idx_b]
             ]
             if any(t in _FIX_TOOLS for t in intervening):
-                return (
-                    f"Tool '{tool_b}' returned the same error after a fix was attempted — "
-                    f"possible unfixed loop. Error: \"{sig_a[:80]}{'...' if len(sig_a) > 80 else ''}\""
-                )
+                sig_display = f"{sig_a[:80]}{'...' if len(sig_a) > 80 else ''}"
+                return {
+                    "type": "recurring_error",
+                    "tool": tool_b,
+                    "error": sig_display,
+                    "message": (
+                        f"Tool '{tool_b}' returned the same error after a fix was attempted — "
+                        f"possible unfixed loop. Error: \"{sig_display}\""
+                    ),
+                }
     return None
+
 
 # ---------------------------------------------------------------------------
 # Health score (transparent model — not an official IBM metric)
 # ---------------------------------------------------------------------------
 
-def compute_score(flags, entries):
+_SCORE_WEIGHTS = {"runaway": 30, "recurring_error": 25, "repetition": 20}
+
+
+def compute_score(flags_struct):
     """
     Score 0-100 based on detected signals. Not an official IBM metric.
-    Starts at 100 and deducts for each detected problem:
+    Starts at 100 and deducts per flag:
       - Runaway session: -30
       - Recurring error: -25
       - Repeated file writes: -20
     """
     score = 100
-    for flag in flags:
-        fl = flag.lower()
-        if "runaway" in fl or "tool calls" in fl:
-            score -= 30
-        elif "recurring" in fl or "same error" in fl or "unfixed loop" in fl:
-            score -= 25
-        elif "written" in fl and "possible loop" in fl:
-            score -= 20
-        else:
-            score -= 15
+    for flag in flags_struct:
+        score -= _SCORE_WEIGHTS.get(flag["type"], 15)
     return max(0, score)
 
+
 # ---------------------------------------------------------------------------
-# Bob judge (headless bob run)
+# Optional AI judge (off by default — see USE_AI_JUDGE above)
 # ---------------------------------------------------------------------------
 
 def _bob_executable():
@@ -151,16 +212,23 @@ def _bob_executable():
             return name
     return "bob"
 
+
 def ask_bob_judge(flags, entries):
-    """Call bob run to get a structured assessment of the flagged session."""
+    """Call `bob -p` (well, `bob run`) to get an LLM-generated assessment of
+    the flagged session. Only used when BOB_MONITOR_AI_JUDGE=1 is set; by
+    default rules.assess() handles this instead. See rules.py's docstring
+    for why. Kept here, unmodified from the original implementation, so
+    nobody who liked the old behavior loses it."""
     summary_lines = []
     for e in entries[-10:]:
         p = e["payload"]
-        summary_lines.append(f"  {e['ts']}  {p.get('tool_name','?')}")
+        summary_lines.append(f"  {e['ts']} {p.get('tool_name', '?')}")
     summary = "\n".join(summary_lines)
+
     flags_text = "\n".join(f"- {f}" for f in flags)
+
     prompt = (
-        "An automated session health monitor flagged this Bob Shell session. "
+        "An automated session health monitor flagged this coding-assistant session. "
         "Flags raised:\n" + flags_text
         + "\n\nLast 10 tool calls (timestamp + tool name):\n" + summary
         + "\n\nReply with ONLY a JSON object:\n"
@@ -168,6 +236,7 @@ def ask_bob_judge(flags, entries):
         '"new_session or narrower_prompt or add_verification or rollback",'
         '"suggested_prompt":"<ready-to-use prompt for a fresh session>"}'
     )
+
     bob = _bob_executable()
     try:
         import time
@@ -201,50 +270,16 @@ def ask_bob_judge(flags, entries):
     except Exception as e:
         return json.dumps({"status": "unknown", "reason": str(e), "recommended_action": "none", "suggested_prompt": ""})
 
-# ---------------------------------------------------------------------------
-# Dashboard activity summary
-# ---------------------------------------------------------------------------
-
-def write_activity(session_id, entries):
-    """
-    Write a compact activity summary to dashboard/activity.json so the
-    dashboard can display recent tool calls without guessing filenames.
-    Format is intentionally simple and does NOT include tool_response
-    (which can be large) unless it is short.
-    """
-    activity = []
-    for e in entries[-50:]:   # last 50 tool calls
-        p = e["payload"]
-        tool_input = p.get("tool_input", {})
-        entry = {
-            "ts": e.get("ts", ""),
-            "tool": p.get("tool_name", ""),
-            "path": tool_input.get("path", "") or tool_input.get("command", ""),
-        }
-        activity.append(entry)
-    summary = {
-        "session_id": session_id or "",
-        "total_calls": len(entries),
-        "updated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "activity": list(reversed(activity)),   # newest first
-    }
-    os.makedirs("dashboard", exist_ok=True)
-    with open(ACTIVITY_FILE, "w", encoding="utf-8") as f:
-        json.dump(summary, f, indent=2)
-
-# ---------------------------------------------------------------------------
-# Parse assessment into structured fields
-# ---------------------------------------------------------------------------
 
 def parse_assessment(verdict_raw):
     """
-    Try to extract structured fields from verdict_raw.
-    Returns (status, reason, recommended_action, suggested_prompt).
-    Falls back gracefully to plain-text handling.
+    Only used on the AI-judge path (BOB_MONITOR_AI_JUDGE=1), to make sense of
+    whatever text `bob -p` returned. The default rules.py path already
+    returns structured fields directly and never touches this.
     """
     if not verdict_raw or verdict_raw == "healthy":
         return "healthy", "", "", ""
-    # Try direct JSON parse
+
     try:
         obj = json.loads(verdict_raw)
         if isinstance(obj, dict):
@@ -256,7 +291,7 @@ def parse_assessment(verdict_raw):
             )
     except (json.JSONDecodeError, ValueError):
         pass
-    # Try to find a JSON object embedded in text
+
     match = re.search(r'\{[^{}]+\}', verdict_raw, re.DOTALL)
     if match:
         try:
@@ -270,8 +305,44 @@ def parse_assessment(verdict_raw):
                 )
         except (json.JSONDecodeError, ValueError):
             pass
-    # Plain text fallback
+
     return "degraded", verdict_raw, "", ""
+
+
+# ---------------------------------------------------------------------------
+# Dashboard activity summary
+# ---------------------------------------------------------------------------
+
+def write_activity(session_id, entries, assistant):
+    """
+    Write a compact activity summary to dashboard/activity.json so the
+    dashboard can display recent tool calls without guessing filenames.
+    Format is intentionally simple and does NOT include tool_response
+    (which can be large) unless it is short.
+    """
+    activity = []
+    for e in entries[-50:]:  # last 50 tool calls
+        p = e["payload"]
+        tool_input = p.get("tool_input", {})
+        entry = {
+            "ts": e.get("ts", ""),
+            "tool": p.get("tool_name", ""),
+            "path": tool_input.get("path", "") or tool_input.get("command", ""),
+        }
+        activity.append(entry)
+
+    summary = {
+        "session_id": session_id or "",
+        "assistant": assistant,
+        "total_calls": len(entries),
+        "updated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "activity": list(reversed(activity)),  # newest first
+    }
+
+    os.makedirs("dashboard", exist_ok=True)
+    with open(ACTIVITY_FILE, "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2)
+
 
 # ---------------------------------------------------------------------------
 # Main
@@ -283,36 +354,47 @@ def main():
     if not entries:
         return
 
-    flags = []
+    assistant = session_assistant(entries)
+
+    flags_struct = []
     for check in [check_repetition, check_runaway, check_recurring_error]:
         result = check(entries)
         if result:
-            flags.append(result)
+            flags_struct.append(result)
+    flags = [f["message"] for f in flags_struct]  # plain strings, for the dashboard/verdict file
 
     os.makedirs("analyzer", exist_ok=True)
-
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     tool_calls = len(entries)
 
-    # Derive session start/end from transcript timestamps
     ts_list = [e.get("ts", "") for e in entries if e.get("ts")]
     session_start = ts_list[0] if ts_list else ""
-    session_end   = ts_list[-1] if ts_list else ""
+    session_end = ts_list[-1] if ts_list else ""
 
-    if flags:
-        verdict_raw = ask_bob_judge(flags, entries)
-        status, reason, recommended_action, suggested_prompt = parse_assessment(verdict_raw)
-        score = compute_score(flags, entries)
+    if flags_struct:
+        if USE_AI_JUDGE:
+            verdict_raw = ask_bob_judge(flags, entries)
+            status, reason, recommended_action, suggested_prompt = parse_assessment(verdict_raw)
+        else:
+            verdict = rules.assess(flags_struct, entries)
+            status = verdict["status"]
+            reason = verdict["reason"]
+            recommended_action = verdict["recommended_action"]
+            suggested_prompt = verdict["suggested_prompt"]
+            verdict_raw = json.dumps(verdict)
+
+        score = compute_score(flags_struct)
 
         with open(VERDICT_FILE, "w", encoding="utf-8") as f:
             f.write(
-                "WARNING SESSION HEALTH:\n" + "\n".join(flags) +
-                "\n\nBob's assessment:\n" + verdict_raw
+                f"WARNING SESSION HEALTH ({assistant}):\n" + "\n".join(flags) +
+                "\n\nAssessment:\n" + verdict_raw
             )
 
         log_entry = {
             "timestamp": timestamp,
             "session_id": session_id or "",
+            "assistant": assistant,
             "session_start": session_start,
             "session_end": session_end,
             "status": "degraded",
@@ -327,10 +409,10 @@ def main():
     else:
         if os.path.exists(VERDICT_FILE):
             os.remove(VERDICT_FILE)
-
         log_entry = {
             "timestamp": timestamp,
             "session_id": session_id or "",
+            "assistant": assistant,
             "session_start": session_start,
             "session_end": session_end,
             "status": "healthy",
@@ -346,7 +428,7 @@ def main():
     with open(HEALTH_LOG, "a", encoding="utf-8") as f:
         f.write(json.dumps(log_entry) + "\n")
 
-    write_activity(session_id, entries)
+    write_activity(session_id, entries, assistant)
 
 
 if __name__ == "__main__":

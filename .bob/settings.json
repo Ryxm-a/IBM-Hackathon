@@ -1,25 +1,13 @@
 {
   "hooks": {
     "PostToolUse": [
-      {
-        "hooks": [
-          { "type": "command", "command": "python3 hooks/log_tool_use.py" }
-        ]
-      }
+      { "hooks": [ { "type": "command", "command": "python3 hooks/log_tool_use.py" } ] }
     ],
     "Stop": [
-      {
-        "hooks": [
-          { "type": "command", "command": "python3 hooks/on_stop_analyze.py", "timeout": 120 }
-        ]
-      }
+      { "hooks": [ { "type": "command", "command": "python3 hooks/on_stop_analyze.py", "timeout": 30 } ] }
     ],
     "UserPromptSubmit": [
-      {
-        "hooks": [
-          { "type": "command", "command": "python3 hooks/on_prompt_check.py" }
-        ]
-      }
+      { "hooks": [ { "type": "command", "command": "python3 hooks/on_prompt_check.py" } ] }
     ]
   }
 }

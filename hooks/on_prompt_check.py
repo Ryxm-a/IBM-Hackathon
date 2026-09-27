@@ -1,3 +1,18 @@
+"""
+hooks/on_prompt_check.py
+--------------------------
+UserPromptSubmit hook (original IBM Bob design), unchanged.
+
+Never needed a change for multi-assistant support: it doesn't read any
+assistant-specific payload fields at all — it just discards stdin and, if
+analyzer/last_verdict.txt exists, writes its contents to stdout. Every
+assistant this project supports (Bob, Claude Code, Codex CLI, and Gemini
+CLI's own UserPromptSubmit-equivalent event) treats a hook's stdout the same
+way: silent additional context for the model, not a visible chat message.
+So this file is wired up directly from all four settings files with no
+adapter in between.
+"""
+
 import os
 import sys
 

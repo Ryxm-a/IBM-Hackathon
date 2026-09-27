@@ -1,0 +1,26 @@
+{
+  "_note": "Gemini CLI's hook system is newer than Claude Code / Codex CLI's and event names can vary by version. This config uses AfterTool and SessionEnd, which matched the docs at build time — if your installed CLI calls its turn-end event something else, check `gemini hooks list` and update the key below. hooks/gemini_adapter.py also double-checks the event name from the payload itself at runtime as a second line of defense, so a version mismatch here fails safe (the event is just ignored) rather than crashing.",
+  "hooks": {
+    "AfterTool": [
+      {
+        "hooks": [
+          { "type": "command", "command": "python3 hooks/gemini_adapter.py" }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          { "type": "command", "command": "python3 hooks/gemini_adapter.py", "timeout": 30 }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "python3 hooks/on_prompt_check.py" }
+        ]
+      }
+    ]
+  }
+}
